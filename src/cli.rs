@@ -13,20 +13,18 @@ use booru_rs::manager::Engine;
 #[command(long_version = format ! (r#"v{version}
  commit: {commit}"#, version = env ! ("CARGO_PKG_VERSION"), commit = "TODO"))]
 pub struct Cli {
-    #[arg(short, long, action = clap::ArgAction::Count)]
-    /// Verbosity log debug
-    pub verbose: u8,
-
+    // #[arg(short, long, action = clap::ArgAction::Count)]
+    // /// Verbosity log debug
+    // pub verbose: u8,
     #[arg(short, long)]
     /// Verbosity log debug
     pub proxy: Option<String>,
 
-    #[arg(long)]
-    /// Write log to file
-    pub log_file: Option<PathBuf>,
-
+    // #[arg(long)]
+    // /// Write log to file
+    // pub log_file: Option<PathBuf>,
     #[arg(short, long)]
-    /// Write log to file
+    /// Path to store fetched dataset
     pub target: PathBuf,
 
     #[command(subcommand)]
@@ -35,7 +33,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// Start http server
+    /// Fetch from booru
     Booru(BooruCommand),
 }
 
@@ -79,8 +77,8 @@ mod tests {
             "image-dataset-fetcher --proxy foobar -t /tmp/ booru -e danbooru -q foo -p 2 -l 50"
                 .split(' ');
         let cli = Cli::try_parse_from(args).unwrap();
-        assert_eq!(cli.verbose, 0);
-        assert_eq!(cli.log_file, None);
+        // assert_eq!(cli.verbose, 0);
+        // assert_eq!(cli.log_file, None);
         assert_eq!(cli.proxy, Some("foobar".to_string()));
 
         match cli.command {

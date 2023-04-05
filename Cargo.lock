@@ -414,6 +414,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "image-dataset-fetcher"
+version = "0.1.0"
+dependencies = [
+ "booru-rs",
+ "clap",
+ "log",
+ "reqwest",
+ "simplelog",
+]
+
+[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -700,17 +711,6 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "winreg",
-]
-
-[[package]]
-name = "rust-image-dataset-fetcher"
-version = "0.1.0"
-dependencies = [
- "booru-rs",
- "clap",
- "log",
- "reqwest",
- "simplelog",
 ]
 
 [[package]]

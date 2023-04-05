@@ -1,5 +1,5 @@
 [package]
-name = "rust-image-dataset-fetcher"
+name = "image-dataset-fetcher"
 version = "0.1.0"
 edition = "2021"
 

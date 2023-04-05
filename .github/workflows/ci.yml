@@ -1,0 +1,222 @@
+name: CICD
+
+env:
+  CICD_INTERMEDIATES_DIR: "_cicd-intermediates"
+  PROJECT_NAME: image-dataset-fetcher
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+
+jobs:
+  version:
+    name: check git version
+    runs-on: ubuntu-20.04
+    outputs:
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+      full: ${{ steps.version.outputs.full_with_prefix }}
+    steps:
+      - name: Check version
+        uses: apkawa/gh-action-semver-check@master
+        id: version
+  cargo_fmt:
+    name: Ensure 'cargo fmt' has been run
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+      - run: cargo fmt -- --check
+
+  cargo_clippy:
+    name: Ensure 'cargo clippy' has been run
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: Swatinem/rust-cache@v2
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.2
+        with:
+          version: "v0.4.0-pre.9"
+      - uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+      - run: cargo clippy --all-targets --all -- -D warnings
+
+
+  build:
+    name: ${{ matrix.job.target }} (${{ matrix.job.os }})
+    runs-on: ${{ matrix.job.os }}
+    needs:
+      - version
+    strategy:
+      fail-fast: false
+      matrix:
+        job:
+          - { target: x86_64-apple-darwin, target_name: macos-x84_64, os: macos-10.15, }
+          #          - { target: x86_64-pc-windows-gnu       , os: windows-2019                  }
+          - { target: x86_64-pc-windows-gnu, target_name: windows-x84_64, os: ubuntu-20.04, use-cross: true, skip-test: true }
+          - { target: x86_64-unknown-linux-gnu, target_name: linux-x84_64, os: ubuntu-20.04, }
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v3
+        with:
+          submodules: true
+
+      - name: Install prerequisites for ubuntu
+        shell: bash
+        if: startsWith(matrix.job.os, 'ubuntu')
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install libssl-dev pkg-config
+
+      - name: Install prerequisites for macos
+        shell: bash
+        if: startsWith(matrix.job.os, 'macos')
+        run: |
+          brew install openssl
+
+      - uses: Swatinem/rust-cache@v2
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.2
+        with:
+          version: "v0.4.0-pre.9"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.job.target }}
+
+
+      - name: Show version information (Rust, cargo, GCC)
+        shell: bash
+        run: |
+          gcc --version || true
+          rustup -V
+          rustup toolchain list
+          rustup default
+          cargo -V
+          rustc -V
+
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+
+          use-cross: ${{ matrix.job.use-cross }}
+          command: build
+          args: --locked --release --target=${{ matrix.job.target }} --bin ${{ env.PROJECT_NAME }}
+
+      - name: Strip debug information from executable
+        id: strip
+        shell: bash
+        run: |
+          # Figure out suffix of binary
+          EXE_suffix=""
+          case ${{ matrix.job.target }} in
+            *-pc-windows-*) EXE_suffix=".exe" ;;
+          esac;
+
+          # Figure out what strip tool to use if any
+          STRIP="strip"
+          case ${{ matrix.job.target }} in
+            arm-unknown-linux-*) STRIP="arm-linux-gnueabihf-strip" ;;
+            aarch64-unknown-linux-gnu) STRIP="aarch64-linux-gnu-strip" ;;
+            *-pc-windows-msvc) STRIP="" ;;
+          esac;
+
+          # Setup paths
+          BIN_DIR="${{ env.CICD_INTERMEDIATES_DIR }}/stripped-release-bin/"
+          mkdir -p "${BIN_DIR}"
+          BIN_NAME="${{ env.PROJECT_NAME }}_${{ needs.version.outputs.full }}_${{ matrix.job.target_name }}${EXE_suffix}"
+          BIN_PATH="${BIN_DIR}/${BIN_NAME}"
+
+          # Copy the release build binary to the result location
+          cp "target/${{ matrix.job.target }}/release/${{ env.PROJECT_NAME }}${EXE_suffix}" "${BIN_PATH}"
+          # Also strip if possible
+          if [ -n "${STRIP}" ]; then
+            "${STRIP}" "${BIN_PATH}"
+          fi
+          # Let subsequent steps know where to find the (stripped) bin
+          echo "BIN_PATH=${BIN_PATH}" >>  $GITHUB_OUTPUT
+          echo "BIN_NAME=${BIN_NAME}" >>  $GITHUB_OUTPUT
+
+      - name: Run tests
+        uses: actions-rs/cargo@v1
+        if: matrix.job.skip-test != true
+        with:
+          use-cross: ${{ matrix.job.use-cross }}
+          command: test
+          args: --locked --target=${{ matrix.job.target }}
+
+      - name: "Artifact upload: "
+        uses: actions/upload-artifact@master
+        with:
+          name: ${{ steps.strip.outputs.BIN_NAME }}
+          path: ${{ steps.strip.outputs.BIN_PATH }}
+
+  release:
+    permissions:
+      contents: write # to upload release asset (softprops/action-gh-release)
+    runs-on: ubuntu-20.04
+    if: ${{ !github.event.schedule && startsWith(github.ref, 'refs/tags') }}
+    needs:
+      - version
+      - cargo_fmt
+      - cargo_clippy
+      - build
+    steps:
+      - uses: actions/checkout@v3
+        # For correctly generate changelog
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        id: download
+        uses: actions/download-artifact@v3
+        with:
+          path: ${{ github.workspace }}/${{ env.CICD_INTERMEDIATES_DIR }}
+
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: install commitizen
+        run: pip install -U git+https://github.com/Apkawa/commitizen@dev#egg=commitizen
+
+      - name: Generate Changelog
+        run: |
+          cz changelog --dry-run ${{ needs.version.outputs.full }}  > ${{ github.workspace }}-CHANGELOG.txt
+          cat ${{ github.workspace }}-CHANGELOG.txt
+
+      - name: Check files
+        run: |
+          pwd
+          ls -lh ${{ env.CICD_INTERMEDIATES_DIR }}
+          ls -lh ${{ github.workspace }}/${{ env.CICD_INTERMEDIATES_DIR }}
+          echo ${{ steps.download.outputs.download-path }}
+          ls -lh ${{ steps.download.outputs.download-path }}
+          ls -lh ./
+
+      - name: Publish archives and packages
+        uses: softprops/action-gh-release@v1
+        if: ${{ !github.event.schedule && startsWith(github.ref, 'refs/tags') }}
+        with:
+          prerelease: ${{ needs.version.outputs.is_prerelease }}
+          body_path: ${{ github.workspace }}-CHANGELOG.txt
+          files: |
+            ${{ steps.download.outputs.download-path }}/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

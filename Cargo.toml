@@ -1,0 +1,19 @@
+[package]
+name = "rust-image-dataset-fetcher"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+booru-rs = { git = "https://github.com/Apkawa/booru-rs.git" }
+
+# For config
+#serde = { version = "1.0.152", features = ["derive"] }
+#toml = { version = "0.7.2" }
+reqwest = { version = "0.11", features = ["blocking"] }
+
+clap = { version = "4.1.8", features = ["derive", "string"] }
+# Logging
+log = "0.4.17"
+simplelog = "0.12.1"

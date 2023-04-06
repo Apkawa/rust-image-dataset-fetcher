@@ -15,6 +15,7 @@ fn main() {
 
     match cli.command {
         Booru(booru_cmd) => {
+            // todo refactoring
             let engine = &booru_cmd.engine;
             let target = if let Some(q) = booru_cmd.query.as_ref() {
                 cli.target.join(format!("{} {}", engine.to_string(), q))
@@ -26,58 +27,81 @@ fn main() {
                 create_dir_all(&target).unwrap();
             }
 
-            let mut builder = engine
-                .builder()
-                .proxy(cli.proxy.as_ref())
-                .limit(booru_cmd.limit);
+            let pages = if booru_cmd.pages > 0 {
+                booru_cmd.pages
+            } else {
+                u32::MAX
+            };
 
-            if let Some(url) = booru_cmd.url.as_ref() {
-                builder = builder.url(url);
-            }
+            for page in 0..=pages {
+                let mut builder = engine
+                    .builder()
+                    .proxy(cli.proxy.as_ref())
+                    .limit(booru_cmd.limit)
+                    .page(page);
 
-            if let Some(q) = booru_cmd.query.as_ref() {
-                builder = builder.tag(q)
-            }
+                if let Some(url) = booru_cmd.url.as_ref() {
+                    builder = builder.url(url);
+                }
 
-            let res = builder.get().unwrap();
+                if let Some(q) = booru_cmd.query.as_ref() {
+                    builder = builder.tag(q)
+                }
 
-            for p in res {
-                thread::sleep(time::Duration::from_millis(500));
-                let images = p.images();
-                let image = if let Some(img) = images.sample {
-                    if img.url.is_empty() {
+                let res = builder.get().unwrap();
+                if res.is_empty() {
+                    break;
+                }
+
+                for p in res {
+                    thread::sleep(time::Duration::from_millis(500));
+                    let images = p.images();
+                    let image = if let Some(img) = images.sample {
+                        if img.url.is_empty() {
+                            images.original
+                        } else {
+                            Some(img)
+                        }
+                    } else {
                         images.original
-                    } else {
-                        Some(img)
-                    }
-                } else {
-                    images.original
-                };
-                if let Some(Image { url, .. }) = image {
-                    println!("{}", url);
-                    let fname = url.split('/').last().unwrap();
-                    let img_path = target.join(fname);
-
-                    let mut txt_path = target.join(fname.split('.').take(1).collect::<String>());
-                    txt_path.set_extension("txt");
-                    if !txt_path.exists() {
-                        write(txt_path, p.tags().join(", ")).unwrap();
-                    }
-                    if img_path.exists() {
-                        continue;
-                    }
-                    let media_res = engine
-                        .builder()
-                        .proxy(cli.proxy.as_ref())
-                        .client()
-                        .get(url.to_string())
-                        .header("User-Agent", USER_AGENT)
-                        .send()
-                        .unwrap();
-                    if media_res.status().is_success() {
-                        write(img_path, media_res.bytes().unwrap()).unwrap();
-                    } else {
-                        dbg!(media_res);
+                    };
+                    if let Some(Image { url, .. }) = image {
+                        println!("{}", url);
+                        let fname = url.split('/').last().unwrap();
+                        let img_path = target.join(fname);
+                        if let Some(ext) = img_path.extension() {
+                            let ext = ext.to_ascii_lowercase();
+                            let ext = ext.to_str().unwrap();
+                            if !["png", "jpeg", "jpg"].contains(&ext) {
+                                continue;
+                            }
+                        } else {
+                            // warn
+                            continue;
+                        }
+                        let mut txt_path =
+                            target.join(fname.split('.').take(1).collect::<String>());
+                        txt_path.set_extension("txt");
+                        if !txt_path.exists() {
+                            write(txt_path, p.tags().join(", ")).unwrap();
+                        }
+                        if img_path.exists() {
+                            continue;
+                        }
+                        let media_res = engine
+                            .builder()
+                            .proxy(cli.proxy.as_ref())
+                            .client()
+                            .get(url.to_string())
+                            .header("User-Agent", USER_AGENT)
+                            .send()
+                            .unwrap();
+                        if media_res.status().is_success() {
+                            // TODO resize and jpg format
+                            write(img_path, media_res.bytes().unwrap()).unwrap();
+                        } else {
+                            dbg!(media_res);
+                        }
                     }
                 }
             }

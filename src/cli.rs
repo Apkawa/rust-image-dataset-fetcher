@@ -56,9 +56,9 @@ pub struct BooruCommand {
     #[arg(short, long, default_value_t = 100)]
     pub limit: u32,
 
-    /// Pages
+    /// Num pages for fetch. 0 - infinity
     #[arg(short, long, default_value_t = 1)]
-    pub pages: usize,
+    pub pages: u32,
 }
 
 /// Parse a single key-value pair
